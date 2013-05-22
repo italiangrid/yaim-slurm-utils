@@ -1,7 +1,7 @@
 #!/bin/bash
 
 PKGNAME=glite-yaim-slurm-utils
-PKGVER=1.0.2
+PKGVER=1.0.1
 PKGREL=1
 
 ITEMS_FOR_SOURCE="config"
