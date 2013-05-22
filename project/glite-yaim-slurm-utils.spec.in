@@ -1,0 +1,45 @@
+Summary: YAIM module for SLURM-utils
+Name: @PKGNAME@
+Version: @PKGVERSION@
+Release: @PKGRELEASE@
+License: Apache License 2.0
+Vendor: EMI
+Group: System Environment/Libraries
+BuildArch: noarch
+Requires: glite-yaim-core
+BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
+AutoReqProv: yes
+Source: %{name}.tar.gz
+
+%description
+This package contains the yaim functions necessary to configure SLURM utils.
+
+%prep
+
+%setup -c -q
+
+%install
+rm -rf %{buildroot}
+mkdir -p %{buildroot}/opt/glite/yaim/functions
+mkdir -p %{buildroot}/opt/glite/yaim/node-info.d
+mkdir -p %{buildroot}/opt/glite/yaim/etc/versions/
+cp %{_builddir}/%{name}-%{version}/config/functions/config* %{buildroot}/opt/glite/yaim/functions
+cp %{_builddir}/%{name}-%{version}/config/node-info.d/glite-slurm_utils %{buildroot}/opt/glite/yaim/node-info.d
+echo "@PKGNAME@ @PKGVERSION@-@PKGRELEASE@" > %{buildroot}/opt/glite/yaim/etc/versions/@PKGNAME@
+
+%clean
+rm -rf %{buildroot}
+
+ 
+
+%files
+%defattr(0644,root,root)
+/opt/glite/yaim/functions/*
+/opt/glite/yaim/etc/versions/@PKGNAME@
+/opt/glite/yaim/node-info.d/*
+
+%changelog
+* Fri Aug 31 2012 CREAM group <cream-support@lists.infn.it> - @PKGVERSION@-@PKGRELEASE@
+- New major release
+
+

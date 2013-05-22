@@ -1,0 +1,68 @@
+##############################################################################
+# Copyright (c) Members of the EGEE Collaboration. 2004.
+# See http://www.eu-egee.org/partners/ for details on the copyright
+# holders.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+##############################################################################
+#
+# NAME :        config_slurm_gip_sched_plugin
+#
+# DESCRIPTION : This functions configures the generic information providor
+#		for the SLURM batch system.
+#
+# AUTHORS :     lisa.zangrando@pd.infn.it  
+#
+# NOTES :       The rest of the dynamic scheduler configuration file can be found
+#               in yaim-cream-ce under config_cream_gip_scheduler_plugin
+#
+# YAIM MODULE:  glite-yaim-slurm-utils
+#
+##############################################################################
+
+function config_slurm_gip_sched_plugin_check () {
+   requires $1 CE_BATCH_SYS
+   return $?
+}
+                                                                                                                             
+function config_slurm_gip_sched_plugin_setenv () {
+   yaimlog DEBUG "This function currently doesn't set any environment variables."
+}
+ 
+function config_slurm_gip_sched_plugin () {
+   GLITE_UTILS_LOCATION_GIP=/var/lib/bdii/gip
+   GLITE_UTILS_LOCATION_ETC=/etc
+
+   BATCH_SYS=`echo $CE_BATCH_SYS | tr '[:upper:]' '[:lower:]'`
+ 
+   ####@ Checks if the batch system is correct for this function
+   if [ ${BATCH_SYS} != "SLURM" ] && [ ${BATCH_SYS} != "slurm" ] ; then
+      yaimlog ERROR "Running config_slurm_gip_sched_plugin but current CE_BATCH_SYS is ${BATCH_SYS}"
+      return 1
+   fi
+
+   mylrmsinfo=/usr/libexec/lrmsinfo-slurm
+
+   ####@ Create ERT configuration
+   if [ ! -d ${GLITE_UTILS_LOCATION_ETC}/lrms ] ; then
+      mkdir -p ${GLITE_UTILS_LOCATION_ETC}/lrms
+   fi
+
+   cat <<EOF >> ${GLITE_UTILS_LOCATION_ETC}/lrms/scheduler.conf
+module_search_path : ../lrms:../ett
+[LRMS]
+lrms_backend_cmd: $mylrmsinfo
+[Scheduler]
+cycle_time : 0
+EOF
+}

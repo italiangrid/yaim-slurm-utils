@@ -1,0 +1,278 @@
+###############################################################################
+# Copyright (c) Members of the EGEE Collaboration. 2004.
+# See http://www.eu-egee.org/partners/ for details on the copyright holders.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+###############################################################################
+#
+# NAME        : config_slurm_ssh
+#
+# DESCRIPTION : This function enables an lcg-CE to work as a SLURM submission host, 
+#               being able to query/interact with the SGE QMASTER host (which may 
+#               be working in a different machine)
+#
+# AUTHORS     : lisa.zangrando@pd.infn.it 
+#
+# NOTES       : 
+#
+# YAIM MODULE : 
+#
+###############################################################################
+
+
+function config_slurm_ssh_check() {
+    requires $1 CE_HOST WN_LIST
+    return $?
+}
+
+
+function config_slurm_ssh_setenv() {
+    return 0
+}
+
+
+function config_slurm_ssh() {
+echo "HostbasedAuthentication yes" >> /etc/ssh/sshd_config
+
+SHOSTS_FILE="/etc/ssh/shosts.equiv"
+KNOWNHOST_FILE="/etc/ssh/ssh_known_hosts"
+
+if [ ! -e $SHOSTS_FILE ]; then
+     yaimlog WARNING "$SHOSTS_FILE doesn't exist. Create it!"
+     touch $SHOSTS_FILE
+     chmod 644 $SHOSTS_FILE 	
+fi
+ 
+for host in `echo $CE_HOST; cat $WN_LIST`; do
+    match=`grep -i $host $SHOSTS_FILE`
+    if [ "X$match" == "X" ]; then
+         yaimlog DEBUG "Include $host in $SHOSTS_FILE"  
+         echo $host >> $SHOSTS_FILE
+    fi
+done
+
+if [ ! -e $KNOWNHOST_FILE ]; then
+     yaimlog WARNING "$KNOWNHOST_FILE doesn't exist. Create it!"
+     touch $KNOWNHOST_FILE
+     chmod 644 $KNOWNHOST_FILE     
+fi
+
+SLURM_KNOWNHOST_SCRIPT_CONF="/etc/edg-slurm-knownhosts.conf"
+yaimlog DEBUG "Building $SLURM_KNOWNHOST_SCRIPT configuration file"
+
+if [ -e ${SLURM_KNOWNHOST_SCRIPT_CONF} ]; then
+   count=`ls -tr ${SLURM_KNOWNHOST_SCRIPT_CONF}.OLD* 2>/dev/null | tail -n 1 | cut -f4 -d"."`
+   if [ "X$count" == "X" ]; then
+       count=0
+   else
+       count=`expr $count + 1`
+   fi
+   mv -f ${SLURM_KNOWNHOST_SCRIPT_CONF} ${SLURM_KNOWNHOST_SCRIPT_CONF}.OLD.${count}
+fi
+
+WNLIST=(`cat $WN_LIST`)
+cat <<EOF_SLURM_KNOWNHOST_SCRIPT_CONF > ${SLURM_KNOWNHOST_SCRIPT_CONF}
+NODES = $CE_HOST ${WNLIST[*]}
+KEYTYPES = rsa1,rsa,dsa
+KNOWNHOSTS = $KNOWNHOST_FILE
+EOF_SLURM_KNOWNHOST_SCRIPT_CONF
+
+if [ "X$count" != "X" ]; then 
+   diff ${SLURM_KNOWNHOST_SCRIPT_CONF}.OLD.${count} ${SLURM_KNOWNHOST_SCRIPT_CONF} > /dev/null 2>&1 
+fi
+if [ $? == 0 ]; then
+     rm -f ${SLURM_KNOWNHOST_SCRIPT_CONF}.OLD.${count}
+else
+     yaimlog WARNING "${SLURM_KNOWNHOST_SCRIPT_CONF} exists. Your old file will be saved as ${SLURM_KNOWNHOST_SCRIPT_CONF}.OLD.${count}"
+fi
+
+count=""
+
+chmod 644  ${SLURM_KNOWNHOST_SCRIPT_CONF}
+
+SLURM_KNOWNHOST_SCRIPT=/usr/sbin/edg-slurm-knownhosts
+yaimlog DEBUG "Building $SLURM_KNOWNHOST_SCRIPT perl script"
+
+if [ -e ${SLURM_KNOWNHOST_SCRIPT} ]; then
+   count=`ls -tr ${SLURM_KNOWNHOST_SCRIPT}.OLD* 2>/dev/null | tail -n 1 | cut -f4 -d"."`
+   if [ "X$count" == "X" ]; then
+       count=0
+   else
+       count=`expr $count + 1`
+   fi
+   mv -f ${SLURM_KNOWNHOST_SCRIPT} ${SLURM_KNOWNHOST_SCRIPT}.OLD.${count}
+fi
+
+
+
+cat <<EOF_SLURM_KNOWNHOST_SCRIPT > ${SLURM_KNOWNHOST_SCRIPT}
+#!/usr/bin/perl -w
+
+use strict ;
+use Fcntl;
+use Socket;
+####################################################
+my \$configfile = '/etc/edg-slurm-knownhosts.conf' ;
+
+my \$specified;       # Nodes that have specified manually.
+my \$types;           # Types of ssh keys to collect(-t)
+my \$knownhosts_file; # The path of known_hosts file.
+my %hosts = ();
+####################################################
+
+# Read the configuration file.
+open(CONFIG,"<\$configfile") || die "Could not open \$configfile: \$!\n" ;
+
+while(<CONFIG>) {
+    \$specified = \$1  if (/^NODES\s*=\s*(.*)/) ;
+    \$types = \$1  if (/^KEYTYPES\s*=\s*(.*)/);
+    \$knownhosts_file = \$1  if (/^KNOWNHOSTS\s*=\s*(.*)/);
+}
+
+close(CONFIG);
+
+if (!\$specified) {
+    die "nodes not defined!"
+}
+
+if (!\$types) {
+    die "types not defined!"
+}
+
+if (!\$knownhosts_file) {
+    die "knownhosts path not defined!"
+}
+
+
+foreach (split(/\s+/,\$specified)) {
+    if (! exists \$hosts{\$_}) {
+       @{\$hosts{\$_}} = split(',',\$types);
+    }
+}
+
+###################################################
+# Parse the current known host files and build a hash.
+my \$host;
+my \$type;
+my \$key;
+
+if (-f \$knownhosts_file ) {
+    open (KNOWN, "<\$knownhosts_file") || die "Could not open \$knownhosts_file\n";
+
+    while(<KNOWN>) {
+        chomp;
+
+        (\$host,\$type,\$key) = (\$_ =~ /^([^,\s]+,*[^,\s]*,*[^,\s]*)[,\s]([^,\s]+)[,\s](.+)\$/);
+        next if ( !defined \$host || !defined \$type || !defined \$key );
+
+        if (! exists \$hosts{\$host}) {
+           @{\$hosts{\$host}} = ();
+        }
+
+        my \$etype = \$type;
+        \$etype = 'rsa1' if ( \$type eq "1024" || \$type eq "2048");
+        \$etype = 'rsa'  if ( \$type eq "ssh-rsa" );
+        \$etype = 'dsa'  if ( \$type eq "ssh-dss" );
+
+        my \$found = 0;
+        foreach (@{\$hosts{\$host}})  {
+            if (\$_ eq \$etype) {
+                \$found = 1;
+                last;
+            }
+         }
+      
+         if (\$found eq 0) {
+            push(@{\$hosts{\$host}}, \$etype);
+         }
+    }
+
+    close(KNOWN) ;
+}
+
+#### DEBUG ####
+my \$debug=0;
+
+if (\$debug) {
+    foreach my \$host (keys %hosts) {
+        print "\$host:";
+
+        foreach (@{\$hosts{\$host}}) {
+            print \$_ if (defined \$_);
+        }
+
+        print "\n";
+    }
+}
+
+# get the keys
+my \$cmd;
+my \$address;
+my \$newkeys;
+
+foreach my \$host (keys %hosts) {
+    \$address = inet_aton(\$host);
+
+    if (\$address) {
+        foreach (@{\$hosts{\$host}}) {
+            \$cmd = "/usr/bin/ssh-keyscan -t \$_ \$host 2>/dev/null" ;
+
+            open(SCAN,"\$cmd|") || die \$!;
+            while(<SCAN>) {
+                chomp;
+                \$newkeys .= "\$_\n" ;
+            }
+
+            close(SCAN);
+        }
+    }
+}
+
+#### DEBUG ####
+if (\$debug) {
+    print "\n\$newkeys\n";
+}
+
+#################################################
+# Rewrite the known host file
+if (\$newkeys) {
+    open(KNOWN, ">\$knownhosts_file") ||die \$!;
+
+    print KNOWN \$newkeys;
+
+    close(KNOWN) ;
+}
+
+EOF_SLURM_KNOWNHOST_SCRIPT
+
+
+
+
+if [ "X$count" != "X" ]; then 
+   diff ${SLURM_KNOWNHOST_SCRIPT}.OLD.${count} ${SLURM_KNOWNHOST_SCRIPT} > /dev/null 2>&1 
+fi
+if [ $? == 0 ]; then
+     rm -f ${SLURM_KNOWNHOST_SCRIPT}.OLD.${count}
+else
+     yaimlog WARNING "${SLURM_KNOWNHOST_SCRIPT} exists. Your old file will be saved as ${SLURM_KNOWNHOST_SCRIPT}.OLD.${count}"
+fi
+
+count=""
+
+chmod 555  ${SLURM_KNOWNHOST_SCRIPT}
+
+${SLURM_KNOWNHOST_SCRIPT}
+
+return 0
+}
+
